@@ -9,7 +9,7 @@ type parser struct {
 }
 
 // parse implements program = stmts, EOF.
-func parse(s *scanner) ([]expression, error) {
+func parse(s *scanner) ([]statement, error) {
 	p := &parser{s: s}
 	p.advance()
 	stmts, err := p.parseStmts()
@@ -30,21 +30,21 @@ func (p *parser) advance() {
 
 // unexpected reports the lookahead that cannot match a grammar production.
 func (p *parser) unexpected(want string) error {
-	return fmt.Errorf("[Line:%d Column:%d] expected %s, got %q (token %d)", p.current.pos.Line, p.current.pos.Column, want, p.current.lit, p.current.tok)
+	return fmt.Errorf("[Line:%d Column:%d] expected %s, got %s %q", p.current.pos.Line, p.current.pos.Column, want, tokenName(p.current.tok), p.current.lit)
 }
 
 // expect consumes a required terminal in the calling grammar production.
 func (p *parser) expect(tok int) error {
 	if p.current.tok != tok {
-		return p.unexpected(fmt.Sprintf("token %d", tok))
+		return p.unexpected(tokenName(tok))
 	}
 	p.advance()
 	return nil
 }
 
 // parseStmts implements stmts = { stmt }; its FOLLOW set is '}' or EOF.
-func (p *parser) parseStmts() ([]expression, error) {
-	var result []expression
+func (p *parser) parseStmts() ([]statement, error) {
+	var result []statement
 	for p.current.tok != EOF && p.current.tok != '}' {
 		stmt, err := p.parseStmt()
 		if err != nil {
@@ -56,7 +56,7 @@ func (p *parser) parseStmts() ([]expression, error) {
 }
 
 // parseStmt implements stmt = assignment | while_stmt | put_stmt | ';'.
-func (p *parser) parseStmt() (expression, error) {
+func (p *parser) parseStmt() (statement, error) {
 	switch p.current.tok {
 	case IDENT:
 		return p.parseAssignment()
@@ -73,7 +73,7 @@ func (p *parser) parseStmt() (expression, error) {
 }
 
 // parseAssignment implements assignment = IDENT, '=', expr, ';'.
-func (p *parser) parseAssignment() (expression, error) {
+func (p *parser) parseAssignment() (statement, error) {
 	name := p.current.lit
 	p.advance()
 	if err := p.expect('='); err != nil {
@@ -90,7 +90,7 @@ func (p *parser) parseAssignment() (expression, error) {
 }
 
 // parseWhile implements while_stmt = 'while', '(', cond, ')', '{', stmts, '}'.
-func (p *parser) parseWhile() (expression, error) {
+func (p *parser) parseWhile() (statement, error) {
 	p.advance()
 	if err := p.expect('('); err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func (p *parser) parseWhile() (expression, error) {
 }
 
 // parsePut implements put_stmt = 'put', '(', put_list, ')', ';'.
-func (p *parser) parsePut() (expression, error) {
+func (p *parser) parsePut() (statement, error) {
 	p.advance()
 	if err := p.expect('('); err != nil {
 		return nil, err
@@ -134,22 +134,33 @@ func (p *parser) parsePut() (expression, error) {
 	return &putStatement{Exprs: exprs}, nil
 }
 
-// parsePutList implements put_list = expr, { ',', expr }.
+// parsePutList implements put_list = put_item, { ',', put_item }.
 func (p *parser) parsePutList() ([]expression, error) {
-	first, err := p.parseExpr()
+	first, err := p.parsePutItem()
 	if err != nil {
 		return nil, err
 	}
 	result := []expression{first}
 	for p.current.tok == ',' {
 		p.advance()
-		next, err := p.parseExpr()
+		next, err := p.parsePutItem()
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, next)
 	}
 	return result, nil
+}
+
+// parsePutItem implements put_item = STRING | expr.
+// STRING is not in FIRST(expr), so one lookahead selects the alternative.
+func (p *parser) parsePutItem() (expression, error) {
+	if p.current.tok == STRING_LITERAL {
+		lit := p.current.lit
+		p.advance()
+		return &stringExpression{Lit: lit}, nil
+	}
+	return p.parseExpr()
 }
 
 // parseCond implements cond = expr, [ compare_op, expr ].
@@ -186,6 +197,7 @@ func (p *parser) parseExpr() (expression, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Fold the consumed prefix into lhs: (a - b) - c, not a - (b - c).
 		lhs = &binOpExpression{LHS: lhs, Operator: op, RHS: rhs}
 	}
 	return lhs, nil
@@ -209,7 +221,7 @@ func (p *parser) parseTerm() (expression, error) {
 	return lhs, nil
 }
 
-// parsePrimary implements primary = NUMBER | IDENT | STRING | '(', expr, ')'.
+// parsePrimary implements primary = NUMBER | IDENT | '(', expr, ')'.
 func (p *parser) parsePrimary() (expression, error) {
 	t := p.current
 	switch t.tok {
@@ -219,9 +231,6 @@ func (p *parser) parsePrimary() (expression, error) {
 	case IDENT:
 		p.advance()
 		return &variableExpression{Lit: t.lit}, nil
-	case STRING_LITERAL:
-		p.advance()
-		return &stringExpression{Lit: t.lit}, nil
 	case '(':
 		p.advance()
 		sub, err := p.parseExpr()
@@ -233,6 +242,6 @@ func (p *parser) parsePrimary() (expression, error) {
 		}
 		return &parenExpression{SubExpr: sub}, nil
 	default:
-		return nil, p.unexpected("number, identifier, string or '('")
+		return nil, p.unexpected("number, identifier or '('")
 	}
 }

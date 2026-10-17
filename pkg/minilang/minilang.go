@@ -8,7 +8,7 @@ import (
 
 // Program is a parsed program. Its AST is immutable during execution.
 type Program struct {
-	statements []expression
+	statements []statement
 }
 
 // Parse implements program = stmts, EOF, returning an error before execution

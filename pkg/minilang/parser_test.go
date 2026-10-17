@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func parseSource(source string) ([]expression, error) {
+func parseSource(source string) ([]statement, error) {
 	s := new(scanner)
 	s.Init(source)
 	return parse(s)
@@ -74,7 +74,7 @@ func TestComparisons(t *testing.T) {
 }
 
 func TestSyntaxErrors(t *testing.T) {
-	for _, src := range []string{`put(-1);`, `put();`, `put(1,);`, `a=1`, `while(1){`, `}`, `{;}`, `1+2;`, `a=1<2;`, `put(1<2);`, `while(1<2<3){}`, `while((1<2)){}`, `put(1);@put(2);`, `put(1);!`, `put(1);` + "\x00", `put("abc);`, `put('abc);`, `put((1);`, `while(1)put(1);`, `put(1);extra`} {
+	for _, src := range []string{`a="x";`, `put("x"+"y");`, `put(("x"));`, `while("x"){}`, `put(-1);`, `put();`, `put(1,);`, `a=1`, `while(1){`, `}`, `{;}`, `1+2;`, `a=1<2;`, `put(1<2);`, `while(1<2<3){}`, `while((1<2)){}`, `put(1);@put(2);`, `put(1);!`, `put(1);` + "\x00", `put("abc);`, `put('abc);`, `put((1);`, `while(1)put(1);`, `put(1);extra`} {
 		t.Run(src, func(t *testing.T) {
 			if _, err := parseSource(src); err == nil {
 				t.Fatal("expected syntax error")
@@ -85,12 +85,8 @@ func TestSyntaxErrors(t *testing.T) {
 
 func TestEvaluationErrors(t *testing.T) {
 	for _, tt := range []struct{ src, want string }{
-		{`a="x"+"y";`, "not supported in arithmetic"},
-		{`a="x";`, "not supported in arithmetic"},
-		{`put(("x"));`, "not supported in arithmetic"},
 		{`a=5/0;`, "division by zero"},
 		{`a=5%0;`, "modulo by zero"},
-		{`while("x"){}`, "not supported in arithmetic"},
 		{`while(1){a=1/0;}`, "division by zero"},
 	} {
 		t.Run(tt.src, func(t *testing.T) {

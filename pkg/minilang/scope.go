@@ -58,3 +58,21 @@ func (s *ScopeStack) Get(name string) (int, *Scope) {
 func (s *Scope) Set(name string, value int) {
 	s.variables[name] = value
 }
+
+// load creates an undefined variable in the current scope with value zero.
+func (s *ScopeStack) load(name string) int {
+	value, owner := s.Get(name)
+	if owner == nil {
+		s.Set(name, 0)
+	}
+	return value
+}
+
+// assign updates the nearest existing binding, or creates a local binding.
+func (s *ScopeStack) assign(name string, value int) {
+	if _, owner := s.Get(name); owner != nil {
+		owner.Set(name, value)
+	} else {
+		s.Set(name, value)
+	}
+}

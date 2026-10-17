@@ -1,0 +1,6 @@
+a=0;
+while(a<3){
+    put("a=",a," next=",a+1);
+    a=a+1;
+}
+put("answer=",(1+2)*3);

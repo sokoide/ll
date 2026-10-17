@@ -1,6 +1,106 @@
-# 手書きLLパーサー（Go）
+# SWEのための手書きLL(1)パーサー・スタックVM教材（Go）
 
-`../bison_flex_1/goyacc4` と同じ構文を、1トークン先読み・バックトラックなしの再帰下降LL(1)パーサーで実装する。標準入力全体を構文解析してASTを作り、成功した場合だけ評価する。
+小さいEBNFから1トークン先読みの再帰下降パーサーを自分で書き、ASTの構造をテストできるようになるための教材。Goの関数・struct・interface・errorとテストを前提とする。VMはパーサーを理解した後の応用として学ぶ。
+
+## 作る言語のコード例
+
+変数への代入、整数計算、文字列と数値の出力、whileによる繰返しを持つ小さい言語を作る。
+
+```text
+a=0;
+while(a<3){
+    put("a=",a," next=",a+1);
+    a=a+1;
+}
+put("answer=",(1+2)*3);
+```
+
+実行結果:
+
+```text
+a=0 next=1
+a=1 next=2
+a=2 next=3
+answer=9
+```
+
+`put`は引数を区切り文字なしで出力し、最後に改行する。各代入・put文には`;`が必要。whileの閉じ`}`には不要だが、後ろに`;`を書けば空文として受理する。コメントは言語に実装していない。
+
+## 完成版のGrammar（EBNF）
+
+`,`は連結、`|`は選択、`{ ... }`は0回以上の反復、`[ ... ]`は省略可能、引用符はソース中の記号やキーワードを表す。NUMBERは整数、IDENTは識別子、STRINGは文字列、EOFは入力終端。
+
+```ebnf
+program     = stmts, EOF ;
+stmts       = { stmt } ;
+stmt        = assignment | while_stmt | put_stmt | ";" ;
+assignment  = IDENT, "=", expr, ";" ;
+while_stmt  = "while", "(", cond, ")", "{", stmts, "}" ;
+put_stmt    = "put", "(", put_list, ")", ";" ;
+put_list    = put_item, { ",", put_item } ;
+put_item    = STRING | expr ;
+cond        = expr, [ compare_op, expr ] ;
+compare_op  = "==" | "!=" | ">=" | ">" | "<=" | "<" ;
+expr        = term, { ("+" | "-"), term } ;
+term        = primary, { ("*" | "/" | "%"), primary } ;
+primary     = NUMBER | IDENT | "(", expr, ")" ;
+```
+
+字句規則も含む正本は[grammar.ebnf](grammar.ebnf)。NUMBERは数字1個以上、IDENTはASCII英字または`_`で始まり以後は英数字と`_`、STRINGはシングル／ダブルクォートで囲む。`put`と`while`は予約語。トークン間の空白・タブ・改行は読み飛ばす。文字列エスケープはない。
+
+完成版は[参照元goyacc4](https://github.com/sokoide/bison_flex_1/tree/main/goyacc4)を基にしている。学習のため文字列はputの直接引数だけに文法を絞った。参照元リポジトリを用意しなくても学べる。
+
+## ビルドして観察する
+
+```sh
+make
+./mini-compiler -dump tokens < examples/arithmetic.mini
+./mini-compiler -dump ast < examples/arithmetic.mini
+./mini-compiler -dump bytecode < examples/arithmetic.mini
+./mini-compiler -engine tree < examples/count.mini
+./mini-compiler -engine vm < examples/count.mini
+make testall
+```
+
+`examples/arithmetic.mini`は`put(1+2*3);`で、結果は7。`-dump`は実行せず、指定した中間結果を表示する。
+
+```text
+Put
+  Binary '+'
+    Number 1
+    Binary '*'
+      Number 2
+      Number 3
+```
+
+ASTから生成する命令列:
+
+```text
+0000 PUSH 1
+0001 PUSH 2
+0002 PUSH 3
+0003 BINARY '*'
+0004 BINARY '+'
+0005 PRINT_INT
+0006 NEWLINE
+```
+
+先に乗算の木を作り、それを加算の右の子にする。VMは木を直接たどらず、この命令列を実行する。
+
+## 学習の進め方
+
+最初に完成版を実行し、その後は別のGoモジュールで各ステップの小さい文法を実装する。各ページに作業用文法、読む関数、実装課題、合格条件を置いている。完成版CLIがステップごとの文法に切り替わるわけではない。
+
+| ステップ | 作るもの | 学ぶ仕組み |
+| --- | --- | --- |
+| [1. 整数1個](docs/steps/01-number.md) | NUMBERとEOFを読む | lexer、トークン、advance / expect |
+| [2. 加減算](docs/steps/02-addition.md) | 左結合のBinary AST | 左再帰除去、反復、不変条件 |
+| [3. 優先順位と括弧](docs/steps/03-precedence.md) | expr / term / primary | 関数の階層、消費範囲、AST形状 |
+| [4. 文と変数](docs/steps/04-statements.md) | 代入・put・文リスト | FIRST、文と式、解析と評価の分離 |
+| [5. while](docs/steps/05-while.md) | 比較・ブロック・繰返し | FOLLOW、省略、左因子分解、スコープ |
+| [6. スタックVM](docs/steps/06-vm.md) | AST→命令列→実行 | 後行順、PC、オペランドスタック、バックパッチ |
+
+仕上げは[単項マイナス・if・呼出しの拡張課題](docs/exercises.md)。[レビューと改善理由](docs/review.md)には教材の設計判断と検証範囲をまとめた。
 
 ## ディレクトリ構成
 
@@ -10,18 +110,24 @@ pkg/minilang/
   minilang.go              公開API（Parse、Program.Execute）
   parser.go                手書きLL(1)パーサー
   lexer.go                 字句解析器
-  ast.go                   ASTノード
-  eval.go                  評価器
+  ast.go                   文と式を区別したAST
+  eval.go                  ASTを直接たどる評価器
+  operations.go            整数演算の意味規則
   scope.go                 スコープ管理
+  compiler.go              ASTから命令列への変換
+  vm.go                    スタックVM・逆アセンブル
+  inspect.go               トークン・ASTの表示
   parser_test.go           構文・評価・エラーのテスト
-  minilang_test.go         外部パッケージからの公開APIテスト
+  minilang_test.go         公開APIのテスト
+  vm_test.go               両エンジンの期待出力・エラー検証
+  teaching_test.go         教材のAST・命令列・例題を検証
+docs/steps/                小さい文法から進む学習手順
+examples/                  実行例と期待出力
 grammar.ebnf               構文と字句規則の文書
 Makefile                   ビルド・テスト
 ```
 
-[parser.go](pkg/minilang/parser.go)の各関数に対応する生成規則を記載している。[文法ファイル](grammar.ebnf)はルートに置く。字句解析の行・列は1始まり、列はUnicode文字単位。
-
-Goが必須とする唯一のディレクトリ構成はないが、このプロジェクトでは`cmd`にCLI、`pkg`に他のGoコードからimportできるライブラリを配置する。
+Goが必須とする唯一のディレクトリ構成はないが、このプロジェクトでは`cmd`にCLI、`pkg`に他のGoコードからimportできるライブラリを配置する。[parser.go](pkg/minilang/parser.go)の各関数に対応する生成規則を記載。字句解析の行・列は1始まり、列はUnicode文字単位。
 
 ## ライブラリとして使う
 
@@ -40,35 +146,36 @@ func example() error {
 }
 ```
 
-`Parse`は入力全体を検証し、`Execute`は指定された出力先へ書き込む。変数スコープは実行ごとに作成するので、同じプログラムを再実行しても状態は持ち越さない。ログはlogrusを使用し、CLI側でレベルを設定する。
+`Parse`は入力全体を検証し、`Execute`は指定された出力先へ書き込む。変数スコープは実行ごとに作成するので、同じプログラムを再実行しても状態は持ち越さない。VMを使う場合は`program.Compile()`で得た`Bytecode`の`Execute(writer)`を呼ぶ。ライブラリはログを出さずエラーを返し、CLIがlogrusで表示する。
 
-## ビルド・実行・テスト
+## MakefileとCLI
 
 ```sh
 make generate  # 互換ターゲット。手書きなので生成不要と表示
 make           # ./mini-compiler をビルド
 make test      # Goテスト
-make testcli   # 実バイナリの標準出力と終了コードを検証
+make testcli   # CLIテスト（既定はtree。ENGINE=vmも指定可能）
+make testall   # Goテスト・両エンジンのCLIテスト・go vet
 make run       # 標準入力から実行
 make clean     # バイナリのみ削除。ソースと文法は残す
-printf 'a=0;while(a<5){a=a+1;b=b+1;};put("ans=",a+b);\n' | ./mini-compiler -logLevel ERROR
-# ans=5
 ```
 
-`-logLevel TRACE|DEBUG|INFO|WARN|ERROR` に対応する（既定はdebug）。出力はstdout、ログとエラーはstderr。構文・評価・標準入力読取りエラーでは非ゼロで終了する。
+既定のエンジンは`tree`。`-dump tokens`は字句解析だけなので構文の正しさまでは判定しない。`-dump ast`と`-dump bytecode`は構文解析も行う。`-logLevel TRACE|DEBUG|INFO|WARN|ERROR`も受け付ける（既定はdebug）。出力はstdout、エラーはstderr。構文・実行・入出力エラーでは非ゼロで終了する。
 
-元の `expr op expr` の左再帰を `expr → term → primary` と反復へ変換した。`* / %` は `+ -` より優先し、各段階の反復でASTを左結合に組み立てる。文は先頭のIDENT・while・put・`;`で分岐できる。`cond`の比較は省略可能で、比較演算子がなければ式だけを条件とする。
+## 完成版の意味規則
 
-意味規則も参照先に合わせる。
+これらはこの言語の選択で、LL(1)の必須条件ではない。
 
-- 整数演算、代入、1個以上の引数を取る`put`、`while`、空文に対応。単項演算、独立したブロック、式だけの文はない。
-- 比較は`while`条件に1個だけ書ける。比較の括弧による入れ子は不可。条件の整数値が正なら繰り返す。
-- while開始時にスコープを1個作り、全反復で共有し、終了時に破棄する。外側の既存変数への代入はその変数を更新する。
+- 整数の`+ - * / %`を扱う。`* / %`は`+ -`より優先し、同じ優先順位では左結合。
+- 比較はwhile条件に1個だけ書ける。比較の括弧による入れ子は不可。正の整数を真とし、0以下は偽。
+- while全体でスコープを1個作り、全反復で共有し、終了時に破棄する。外側の既存変数への代入はその変数を更新する。
 - 未定義変数を読むと現在のスコープに0で作る。
-- 文字列は`put`の直接引数で使う。代入・演算・条件や括弧内の文字列は評価エラー。文字列エスケープはない。
-- 整数はGoの`int`。ゼロ除算・剰余ゼロは評価エラー。直接出力した数値リテラルは先頭ゼロを維持する。
+- STRINGはputの直接引数に限る。代入・演算・条件や括弧内の文字列は構文エラー。
+- 直接出力した数値リテラルは先頭ゼロを維持する。`put(001);`は001、`put((001));`は数値評価を経由して1。
+- 整数はGoのint。ゼロ除算・剰余ゼロは実行時エラー。
+- 単項演算、独立したブロック、式だけの文、関数はない。単項マイナス等は拡張課題にしている。
 
-字句解析はCRLFも空白として受け付ける。参照先と異なり、未閉鎖文字列は構文エラーにする。不正文字や末尾の余分なトークンも受理せず、全入力を検証する。外部パーサー生成ツールは不要。
+未閉鎖文字列、不正文字、余分な末尾トークンは拒否する。CRLFも空白として受理し、文字列内の改行は許可する。パーサー生成ツールは不要。
 
 ## 左再帰とLL(1)・LALRの違い
 
@@ -104,9 +211,14 @@ stmts = { stmt } ;
 また、左再帰を除去するだけで、すべての文法がLL(1)になるわけではない。選択肢の先頭トークンが重なる場合は左因子分解などが必要で、省略可能な規則ではFIRST集合（開始できるトークン）とFOLLOW集合（直後に来るトークン）の衝突も調べる。この文法では次のように1トークンで判断できる。
 
 - `stmt`: IDENT、`while`、`put`、`;`で選択肢が分かれる。
-- `primary`: NUMBER、IDENT、STRING、`(`で選択肢が分かれる。
+- `primary`: NUMBER、IDENT、`(`で選択肢が分かれる。
 - `expr`と`term`の反復: 対応する演算子なら継続し、それ以外なら呼出し元へ戻る。
 - `cond`の省略部分: 比較演算子なら右辺を読み、`)`なら比較なしで終える。
 - `stmts`: 文の開始トークンなら継続し、`}`またはEOFで終える。最上位の`}`やブロック内のEOFは、その後の呼出し元の必須トークン検査で拒否する。
 
 LALRも先読みが1トークンであることと、LL(1)で書けることは同義ではない。ボトムアップで既に読んだ部分をスタックに保持して判断するLALRと、展開する生成規則を先に選ぶLL(1)では、扱える文法の範囲が異なる。
+
+
+## 適用範囲
+
+多倍長整数や算術オーバーフローの検出は実装しない。無限ループの命令数制限、深い括弧の再帰制限、複数エラーからの回復も扱わない。VMはコンパイラが生成したメモリ内命令列を実行する教材で、任意の外部bytecodeを実行するサービスではない。

@@ -1,17 +1,18 @@
-(* Syntax: = definition, , sequence, | choice, { } repetition,
-   [ ] optional, (* ... *) comment. EOF is end of input. *)
+(* Notation: = definition, comma sequence, | choice, braces repetition,
+   brackets optional. EOF is end of input. *)
 program     = stmts, EOF ;
 stmts       = { stmt } ;
 stmt        = assignment | while_stmt | put_stmt | ";" ;
 assignment  = IDENT, "=", expr, ";" ;
 while_stmt  = "while", "(", cond, ")", "{", stmts, "}" ;
 put_stmt    = "put", "(", put_list, ")", ";" ;
-put_list    = expr, { ",", expr } ;
+put_list    = put_item, { ",", put_item } ;
+put_item    = STRING | expr ;
 cond        = expr, [ compare_op, expr ] ;
 compare_op  = "==" | "!=" | ">=" | ">" | "<=" | "<" ;
 expr        = term, { ("+" | "-"), term } ;
 term        = primary, { ("*" | "/" | "%"), primary } ;
-primary     = NUMBER | IDENT | STRING | "(", expr, ")" ;
+primary     = NUMBER | IDENT | "(", expr, ")" ;
 
 (* Lexical rules: longest match; put and while are reserved words.
    Whitespace is skipped between tokens, never inside a token. *)

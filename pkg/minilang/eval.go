@@ -3,51 +3,36 @@ package minilang
 import (
 	"fmt"
 	"io"
-	"reflect"
 	"strconv"
-
-	log "github.com/sirupsen/logrus"
 )
 
-func (e *evaluator) evaluateStmts(stmts []expression) (int, error) {
-	var ret int
-	var err error
+// evaluator is the tree-walk baseline: execution recursively visits AST nodes.
+type evaluator struct {
+	scopes *ScopeStack
+	output io.Writer
+}
 
-	for line, stmt := range stmts {
-		ret, err = e.evaluateStmt(stmt)
-		if err != nil {
-			log.Errorf("[stmt %d] evaluation error: %v", line, err)
+func newEvaluator(output io.Writer) *evaluator {
+	return &evaluator{scopes: NewScopeStack(), output: output}
+}
+
+func (e *evaluator) evaluateStmts(stmts []statement) (int, error) {
+	for _, stmt := range stmts {
+		if _, err := e.evaluateStmt(stmt); err != nil {
 			return 0, err
 		}
 	}
-	return ret, err
+	return 0, nil
 }
 
-func (e *evaluator) evaluateStmt(stmt expression) (int, error) {
-	var ret int
-	var err error
-
+func (e *evaluator) evaluateStmt(stmt statement) (int, error) {
 	switch s := stmt.(type) {
-	case *exprStatement:
-		ret, err = e.evaluateExpr(s.Expr)
-		if err == nil {
-			log.Debugf("expr result: %d\n", ret)
-			return 0, nil
-		}
-		return 0, err
 	case *assignStatement:
-		ret, err = e.evaluateExpr(s.Expr)
-		if err == nil {
-			if _, scope := e.scopes.Get(s.Name); scope != nil {
-				scope.Set(s.Name, ret)
-			} else {
-				log.Debugf("%s doesn't exist in any scope. Making it in the current scope", s.Name)
-				e.scopes.Set(s.Name, ret)
-			}
-			log.Debugf("%s = %d\n", s.Name, ret)
-			return 0, nil
+		value, err := e.evaluateExpr(s.Expr)
+		if err != nil {
+			return 0, err
 		}
-		return 0, err
+		e.scopes.assign(s.Name, value)
 	case *putStatement:
 		for _, expr := range s.Exprs {
 			if err := e.printExpr(expr); err != nil {
@@ -57,188 +42,72 @@ func (e *evaluator) evaluateStmt(stmt expression) (int, error) {
 		_, err := fmt.Fprintln(e.output)
 		return 0, err
 	case *whileStatement:
-		log.Debug("whileStatement - scope pushed")
 		e.scopes.PushScope()
+		defer e.scopes.PopScope()
 		for {
-			ret, err = e.evaluateExpr(s.Cond)
+			value, err := e.evaluateExpr(s.Cond)
 			if err != nil {
-				log.Debug("whileStatement -scope poped")
-				e.scopes.PopScope()
 				return 0, err
 			}
-			if ret > 0 {
-				_, err = e.evaluateStmts(s.Body)
-				if err != nil {
-					log.Debug("whileStatement -scope poped")
-					e.scopes.PopScope()
-					return 0, err
-				}
-			} else {
+			if value <= 0 {
 				break
 			}
+			if _, err := e.evaluateStmts(s.Body); err != nil {
+				return 0, err
+			}
 		}
-		log.Debug("whileStatement -scope poped")
-		e.scopes.PopScope()
-		return 0, err
 	case *emptyStatement:
-		log.Debug("emptyStatement")
-		return 0, nil
+		// An empty statement has no effect.
 	default:
-		return 0, fmt.Errorf("%s not supported yet", reflect.TypeOf(stmt))
+		return 0, fmt.Errorf("unsupported statement %T", stmt)
 	}
+	return 0, nil
 }
 
 func (e *evaluator) printExpr(expr expression) error {
-	log.Debugf("printExpr %+v\n", expr)
-
-	var ret int
-	var err error
-	var scope *Scope
-
+	// Direct literals retain their spelling, including leading zeros.
 	switch x := expr.(type) {
 	case *numberExpression:
-		_, err = fmt.Fprintf(e.output, "%s", x.Lit)
-	case *variableExpression:
-		if ret, scope = e.scopes.Get(x.Lit); scope != nil {
-			_, err = fmt.Fprintf(e.output, "%d", ret)
-		} else {
-			// Same semantics as evaluateExpr: reading an undefined
-			// variable yields 0 (and auto-creates it in the current
-			// scope) instead of failing.
-			e.scopes.Set(x.Lit, 0)
-			_, err = fmt.Fprintf(e.output, "%d", 0)
-		}
+		_, err := io.WriteString(e.output, x.Lit)
+		return err
 	case *stringExpression:
-		_, err = fmt.Fprintf(e.output, "%s", x.Lit)
+		_, err := io.WriteString(e.output, x.Lit)
+		return err
 	default:
-		ret, err = e.evaluateExpr(expr)
+		value, err := e.evaluateExpr(expr)
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(e.output, "%d", ret)
+		_, err = fmt.Fprint(e.output, value)
+		return err
 	}
-	return err
 }
 
 func (e *evaluator) evaluateExpr(expr expression) (int, error) {
-	log.Debugf("evaluateExpr %+v\n", expr)
 	switch x := expr.(type) {
-
 	case *numberExpression:
-		v, err := strconv.Atoi(x.Lit)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		return v, nil
-	case *parenExpression:
-		v, err := e.evaluateExpr(x.SubExpr)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		return v, nil
-	case *binOpExpression:
-		lhsV, err := e.evaluateExpr(x.LHS)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		rhsV, err := e.evaluateExpr(x.RHS)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		switch x.Operator {
-		case '+':
-			return lhsV + rhsV, nil
-		case '-':
-			return lhsV - rhsV, nil
-		case '*':
-			return lhsV * rhsV, nil
-		case '/':
-			if rhsV == 0 {
-				return 0, fmt.Errorf("division by zero")
-			}
-			return lhsV / rhsV, nil
-		case '%':
-			if rhsV == 0 {
-				return 0, fmt.Errorf("modulo by zero")
-			}
-			return lhsV % rhsV, nil
-		default:
-			return 0, fmt.Errorf("unknown operator: %v", x.Operator)
-		}
+		return strconv.Atoi(x.Lit)
 	case *variableExpression:
-		var v int
-		var scope *Scope
-		if v, scope = e.scopes.Get(x.Lit); scope != nil {
-			return v, nil
-		}
-		// Reading an undefined variable yields 0 (and auto-creates it in
-		// the current scope so assignments like `b=b+1;` inside a while
-		// body still work).
-		e.scopes.Set(x.Lit, 0)
-		log.Warnf("variable %s not found, 0 assigned", x.Lit)
-		return 0, nil
-	case *stringExpression:
-		return 0, fmt.Errorf("string %q not supported in arithmetic", x.Lit)
+		return e.scopes.load(x.Lit), nil
+	case *parenExpression:
+		return e.evaluateExpr(x.SubExpr)
+	case *binOpExpression:
+		return e.evaluateBinary(x.LHS, x.Operator, x.RHS)
 	case *condExpression:
-		lhsV, err := e.evaluateExpr(x.LHS)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		rhsV, err := e.evaluateExpr(x.RHS)
-		if err != nil {
-			log.Warnf("err: %v", err)
-			return 0, err
-		}
-		switch x.Operator {
-		case EQOP:
-			if lhsV == rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		case NEOP:
-			if lhsV != rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		case GEOP:
-			if lhsV >= rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		case GTOP:
-			if lhsV > rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		case LEOP:
-			if lhsV <= rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		case LTOP:
-			if lhsV < rhsV {
-				return 1, nil
-			}
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("invalid Operator %v", x.Operator)
-		}
+		return e.evaluateBinary(x.LHS, x.Operator, x.RHS)
 	default:
-		return 0, fmt.Errorf("unknown expression type %s for %+v", reflect.TypeOf(x), x)
+		return 0, fmt.Errorf("unsupported numeric expression %T", expr)
 	}
 }
 
-// evaluator owns the mutable state of one program execution.
-type evaluator struct {
-	scopes *ScopeStack
-	output io.Writer
-}
-
-func newEvaluator(output io.Writer) *evaluator {
-	return &evaluator{scopes: NewScopeStack(), output: output}
+func (e *evaluator) evaluateBinary(lhs expression, op int, rhs expression) (int, error) {
+	left, err := e.evaluateExpr(lhs)
+	if err != nil {
+		return 0, err
+	}
+	right, err := e.evaluateExpr(rhs)
+	if err != nil {
+		return 0, err
+	}
+	return applyBinary(op, left, right)
 }

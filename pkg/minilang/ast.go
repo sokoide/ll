@@ -1,6 +1,7 @@
 package minilang
 
-// expressions
+// Expressions produce values; statements perform actions.
+// These separate interfaces prevent statements from appearing inside arithmetic.
 type (
 	expression interface {
 		expression()
@@ -48,10 +49,6 @@ type (
 	emptyStatement struct {
 	}
 
-	exprStatement struct {
-		Expr expression
-	}
-
 	assignStatement struct {
 		Name string
 		Expr expression
@@ -63,12 +60,13 @@ type (
 
 	whileStatement struct {
 		Cond expression
-		Body []expression
+		Body []statement
 	}
 )
 
-func (x *emptyStatement) expression()  {}
-func (x *exprStatement) expression()   {}
-func (x *assignStatement) expression() {}
-func (x *putStatement) expression()    {}
-func (x *whileStatement) expression()  {}
+type statement interface{ statement() }
+
+func (x *emptyStatement) statement()  {}
+func (x *assignStatement) statement() {}
+func (x *putStatement) statement()    {}
+func (x *whileStatement) statement()  {}

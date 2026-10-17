@@ -1,5 +1,7 @@
 package minilang
 
+import "strconv"
+
 // ========================================
 const (
 	// EOF end of file
@@ -234,4 +236,38 @@ func (s *scanner) scanString(endingChar rune) string {
 		s.next()
 	}
 	return string(ret)
+}
+
+// tokenName maps internal token numbers to grammar terminals for diagnostics.
+func tokenName(tok int) string {
+	switch tok {
+	case EOF:
+		return "EOF"
+	case ILLEGAL:
+		return "ILLEGAL"
+	case IDENT:
+		return "IDENT"
+	case NUMBER_LITERAL:
+		return "NUMBER"
+	case STRING_LITERAL:
+		return "STRING"
+	case PUT:
+		return "put"
+	case WHILE:
+		return "while"
+	case EQOP:
+		return "=="
+	case NEOP:
+		return "!="
+	case GEOP:
+		return ">="
+	case GTOP:
+		return ">"
+	case LEOP:
+		return "<="
+	case LTOP:
+		return "<"
+	default:
+		return strconv.QuoteRune(rune(tok))
+	}
 }
