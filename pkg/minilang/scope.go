@@ -1,14 +1,10 @@
-package main
+package minilang
 
 // Scope represents a single scope level
 type Scope struct {
 	variables map[string]int
 	parent    *Scope
 }
-
-// scopeStack is the multi-level scope the interpreter runs in.
-// Tests reset it via scopeStack = NewScopeStack().
-var scopeStack = NewScopeStack()
 
 // ScopeStack manages the stack of scopes
 type ScopeStack struct {

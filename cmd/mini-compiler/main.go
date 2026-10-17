@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"sokoide.com/ll/pkg/minilang"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -22,14 +23,12 @@ func main() {
 		log.Error(err)
 		os.Exit(1)
 	}
-	s := new(scanner)
-	s.Init(string(source))
-	program, err := parse(s)
+	program, err := minilang.Parse(string(source))
 	if err != nil {
 		log.Errorf("Parse error: %v", err)
 		os.Exit(1)
 	}
-	if _, err := evaluateStmts(program); err != nil {
+	if err := program.Execute(os.Stdout); err != nil {
 		log.Errorf("Evaluation error: %v", err)
 		os.Exit(1)
 	}

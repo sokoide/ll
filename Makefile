@@ -1,5 +1,5 @@
 TARGET=./mini-compiler
-SRCS=main.go lexer.go parser.go eval.go ast.go scope.go go.mod go.sum
+SRCS=$(wildcard cmd/mini-compiler/*.go pkg/minilang/*.go) go.mod go.sum
 LL=ERROR
 
 .PHONY: all clean generate run test testcli
@@ -7,7 +7,7 @@ LL=ERROR
 all: $(TARGET)
 
 $(TARGET): $(SRCS)
-	go build -o $(TARGET)
+	go build -o $(TARGET) ./cmd/mini-compiler
 
 generate:
 	@echo 'Handwritten LL parser: no code generation required (see grammar.ebnf).'

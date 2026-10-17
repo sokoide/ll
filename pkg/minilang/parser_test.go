@@ -1,6 +1,7 @@
-package main
+package minilang
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -29,18 +30,18 @@ func TestEvaluation(t *testing.T) {
 		{"CRLF", "a=1;\r\na=a+1;", 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			scopeStack = NewScopeStack()
+			evaluator := newEvaluator(io.Discard)
 			program, err := parseSource(tt.source)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = evaluateStmts(program); err != nil {
+			if _, err = evaluator.evaluateStmts(program); err != nil {
 				t.Fatal(err)
 			}
-			if got, _ := scopeStack.Get("a"); got != tt.want {
+			if got, _ := evaluator.scopes.Get("a"); got != tt.want {
 				t.Fatalf("a=%d, want %d", got, tt.want)
 			}
-			if _, scope := scopeStack.Get("b"); scope != nil {
+			if _, scope := evaluator.scopes.Get("b"); scope != nil {
 				t.Fatal("loop-local b leaked")
 			}
 		})
@@ -50,12 +51,12 @@ func TestEvaluation(t *testing.T) {
 func TestComparisons(t *testing.T) {
 	for _, cond := range []string{"1==1", "1!=2", "2>=2", "2>1", "1<=1", "1<2", "2==1", "1!=1", "1>=2", "1>2", "2<=1", "2<1"} {
 		t.Run(cond, func(t *testing.T) {
-			scopeStack = NewScopeStack()
+			evaluator := newEvaluator(io.Discard)
 			program, err := parseSource("while(" + cond + "){;}")
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := evaluateExpr(program[0].(*whileStatement).Cond)
+			got, err := evaluator.evaluateExpr(program[0].(*whileStatement).Cond)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,17 +94,17 @@ func TestEvaluationErrors(t *testing.T) {
 		{`while(1){a=1/0;}`, "division by zero"},
 	} {
 		t.Run(tt.src, func(t *testing.T) {
-			scopeStack = NewScopeStack()
-			outer := scopeStack.current
+			evaluator := newEvaluator(io.Discard)
+			outer := evaluator.scopes.current
 			program, err := parseSource(tt.src)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = evaluateStmts(program)
+			_, err = evaluator.evaluateStmts(program)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("got %v, want %s", err, tt.want)
 			}
-			if scopeStack.current != outer {
+			if evaluator.scopes.current != outer {
 				t.Fatal("scope not restored after error")
 			}
 		})

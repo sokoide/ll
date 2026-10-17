@@ -2,11 +2,47 @@
 
 `../bison_flex_1/goyacc4` と同じ構文を、1トークン先読み・バックトラックなしの再帰下降LL(1)パーサーで実装する。標準入力全体を構文解析してASTを作り、成功した場合だけ評価する。
 
-- [grammar.ebnf](grammar.ebnf): 構文と字句規則の専用文法文書。
-- [parser.go](parser.go): 各関数のコメントに対応する生成規則を記載。補助関数も役割を記載。
-- `lexer.go`: 手書き字句解析器。行・列は1始まりで、列はUnicode文字単位。
-- `ast.go`, `eval.go`, `scope.go`: 参照先を基にしたAST、評価器、スコープ管理。
-- `main.go`: CLI。`main_test.go`: 構文・評価・エラーのテスト。
+## ディレクトリ構成
+
+```text
+cmd/mini-compiler/main.go   CLIのエントリーポイント
+pkg/minilang/
+  minilang.go              公開API（Parse、Program.Execute）
+  parser.go                手書きLL(1)パーサー
+  lexer.go                 字句解析器
+  ast.go                   ASTノード
+  eval.go                  評価器
+  scope.go                 スコープ管理
+  parser_test.go           構文・評価・エラーのテスト
+  minilang_test.go         外部パッケージからの公開APIテスト
+grammar.ebnf               構文と字句規則の文書
+Makefile                   ビルド・テスト
+```
+
+[parser.go](pkg/minilang/parser.go)の各関数に対応する生成規則を記載している。[文法ファイル](grammar.ebnf)はルートに置く。字句解析の行・列は1始まり、列はUnicode文字単位。
+
+Goが必須とする唯一のディレクトリ構成はないが、このプロジェクトでは`cmd`にCLI、`pkg`に他のGoコードからimportできるライブラリを配置する。
+
+## ライブラリとして使う
+
+```go
+import (
+    "os"
+    "sokoide.com/ll/pkg/minilang"
+)
+
+func example() error {
+    program, err := minilang.Parse(`a=40;put("ans=",a+2);`)
+    if err != nil {
+        return err
+    }
+    return program.Execute(os.Stdout)
+}
+```
+
+`Parse`は入力全体を検証し、`Execute`は指定された出力先へ書き込む。変数スコープは実行ごとに作成するので、同じプログラムを再実行しても状態は持ち越さない。ログはlogrusを使用し、CLI側でレベルを設定する。
+
+## ビルド・実行・テスト
 
 ```sh
 make generate  # 互換ターゲット。手書きなので生成不要と表示

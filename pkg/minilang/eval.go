@@ -1,19 +1,20 @@
-package main
+package minilang
 
 import (
 	"fmt"
+	"io"
 	"reflect"
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
 )
 
-func evaluateStmts(stmts []expression) (int, error) {
+func (e *evaluator) evaluateStmts(stmts []expression) (int, error) {
 	var ret int
 	var err error
 
 	for line, stmt := range stmts {
-		ret, err = evaluateStmt(stmt)
+		ret, err = e.evaluateStmt(stmt)
 		if err != nil {
 			log.Errorf("[stmt %d] evaluation error: %v", line, err)
 			return 0, err
@@ -22,26 +23,26 @@ func evaluateStmts(stmts []expression) (int, error) {
 	return ret, err
 }
 
-func evaluateStmt(stmt expression) (int, error) {
+func (e *evaluator) evaluateStmt(stmt expression) (int, error) {
 	var ret int
 	var err error
 
 	switch s := stmt.(type) {
 	case *exprStatement:
-		ret, err = evaluateExpr(s.Expr)
+		ret, err = e.evaluateExpr(s.Expr)
 		if err == nil {
 			log.Debugf("expr result: %d\n", ret)
 			return 0, nil
 		}
 		return 0, err
 	case *assignStatement:
-		ret, err = evaluateExpr(s.Expr)
+		ret, err = e.evaluateExpr(s.Expr)
 		if err == nil {
-			if _, scope := scopeStack.Get(s.Name); scope != nil {
+			if _, scope := e.scopes.Get(s.Name); scope != nil {
 				scope.Set(s.Name, ret)
 			} else {
-				log.Debugf("%s doesn't exist in all scopeStack. Making it in the current scope", s.Name)
-				scopeStack.Set(s.Name, ret)
+				log.Debugf("%s doesn't exist in any scope. Making it in the current scope", s.Name)
+				e.scopes.Set(s.Name, ret)
 			}
 			log.Debugf("%s = %d\n", s.Name, ret)
 			return 0, nil
@@ -49,27 +50,27 @@ func evaluateStmt(stmt expression) (int, error) {
 		return 0, err
 	case *putStatement:
 		for _, expr := range s.Exprs {
-			if err := printExpr(expr); err != nil {
+			if err := e.printExpr(expr); err != nil {
 				return 0, err
 			}
 		}
-		fmt.Println()
-		return 0, nil
+		_, err := fmt.Fprintln(e.output)
+		return 0, err
 	case *whileStatement:
 		log.Debug("whileStatement - scope pushed")
-		scopeStack.PushScope()
+		e.scopes.PushScope()
 		for {
-			ret, err = evaluateExpr(s.Cond)
+			ret, err = e.evaluateExpr(s.Cond)
 			if err != nil {
 				log.Debug("whileStatement -scope poped")
-				scopeStack.PopScope()
+				e.scopes.PopScope()
 				return 0, err
 			}
 			if ret > 0 {
-				_, err = evaluateStmts(s.Body)
+				_, err = e.evaluateStmts(s.Body)
 				if err != nil {
 					log.Debug("whileStatement -scope poped")
-					scopeStack.PopScope()
+					e.scopes.PopScope()
 					return 0, err
 				}
 			} else {
@@ -77,7 +78,7 @@ func evaluateStmt(stmt expression) (int, error) {
 			}
 		}
 		log.Debug("whileStatement -scope poped")
-		scopeStack.PopScope()
+		e.scopes.PopScope()
 		return 0, err
 	case *emptyStatement:
 		log.Debug("emptyStatement")
@@ -87,68 +88,68 @@ func evaluateStmt(stmt expression) (int, error) {
 	}
 }
 
-func printExpr(expr expression) error {
+func (e *evaluator) printExpr(expr expression) error {
 	log.Debugf("printExpr %+v\n", expr)
 
 	var ret int
 	var err error
 	var scope *Scope
 
-	switch e := expr.(type) {
+	switch x := expr.(type) {
 	case *numberExpression:
-		fmt.Printf("%s", e.Lit)
+		_, err = fmt.Fprintf(e.output, "%s", x.Lit)
 	case *variableExpression:
-		if ret, scope = scopeStack.Get(e.Lit); scope != nil {
-			fmt.Printf("%d", ret)
+		if ret, scope = e.scopes.Get(x.Lit); scope != nil {
+			_, err = fmt.Fprintf(e.output, "%d", ret)
 		} else {
 			// Same semantics as evaluateExpr: reading an undefined
 			// variable yields 0 (and auto-creates it in the current
 			// scope) instead of failing.
-			scopeStack.Set(e.Lit, 0)
-			fmt.Printf("%d", 0)
+			e.scopes.Set(x.Lit, 0)
+			_, err = fmt.Fprintf(e.output, "%d", 0)
 		}
 	case *stringExpression:
-		fmt.Printf("%s", e.Lit)
+		_, err = fmt.Fprintf(e.output, "%s", x.Lit)
 	default:
-		ret, err = evaluateExpr(expr)
+		ret, err = e.evaluateExpr(expr)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%d", ret)
+		_, err = fmt.Fprintf(e.output, "%d", ret)
 	}
-	return nil
+	return err
 }
 
-func evaluateExpr(expr expression) (int, error) {
+func (e *evaluator) evaluateExpr(expr expression) (int, error) {
 	log.Debugf("evaluateExpr %+v\n", expr)
-	switch e := expr.(type) {
+	switch x := expr.(type) {
 
 	case *numberExpression:
-		v, err := strconv.Atoi(e.Lit)
+		v, err := strconv.Atoi(x.Lit)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
 		return v, nil
 	case *parenExpression:
-		v, err := evaluateExpr(e.SubExpr)
+		v, err := e.evaluateExpr(x.SubExpr)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
 		return v, nil
 	case *binOpExpression:
-		lhsV, err := evaluateExpr(e.LHS)
+		lhsV, err := e.evaluateExpr(x.LHS)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
-		rhsV, err := evaluateExpr(e.RHS)
+		rhsV, err := e.evaluateExpr(x.RHS)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
-		switch e.Operator {
+		switch x.Operator {
 		case '+':
 			return lhsV + rhsV, nil
 		case '-':
@@ -166,34 +167,34 @@ func evaluateExpr(expr expression) (int, error) {
 			}
 			return lhsV % rhsV, nil
 		default:
-			return 0, fmt.Errorf("unknown operator: %v", e.Operator)
+			return 0, fmt.Errorf("unknown operator: %v", x.Operator)
 		}
 	case *variableExpression:
 		var v int
 		var scope *Scope
-		if v, scope = scopeStack.Get(e.Lit); scope != nil {
+		if v, scope = e.scopes.Get(x.Lit); scope != nil {
 			return v, nil
 		}
 		// Reading an undefined variable yields 0 (and auto-creates it in
 		// the current scope so assignments like `b=b+1;` inside a while
 		// body still work).
-		scopeStack.Set(e.Lit, 0)
-		log.Warnf("variable %s not found, 0 assigned", e.Lit)
+		e.scopes.Set(x.Lit, 0)
+		log.Warnf("variable %s not found, 0 assigned", x.Lit)
 		return 0, nil
 	case *stringExpression:
-		return 0, fmt.Errorf("string %q not supported in arithmetic", e.Lit)
+		return 0, fmt.Errorf("string %q not supported in arithmetic", x.Lit)
 	case *condExpression:
-		lhsV, err := evaluateExpr(e.LHS)
+		lhsV, err := e.evaluateExpr(x.LHS)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
-		rhsV, err := evaluateExpr(e.RHS)
+		rhsV, err := e.evaluateExpr(x.RHS)
 		if err != nil {
 			log.Warnf("err: %v", err)
 			return 0, err
 		}
-		switch e.Operator {
+		switch x.Operator {
 		case EQOP:
 			if lhsV == rhsV {
 				return 1, nil
@@ -225,9 +226,19 @@ func evaluateExpr(expr expression) (int, error) {
 			}
 			return 0, nil
 		default:
-			return 0, fmt.Errorf("invalid Operator %v", e.Operator)
+			return 0, fmt.Errorf("invalid Operator %v", x.Operator)
 		}
 	default:
-		return 0, fmt.Errorf("unknown expression type %s for %+v", reflect.TypeOf(e), e)
+		return 0, fmt.Errorf("unknown expression type %s for %+v", reflect.TypeOf(x), x)
 	}
+}
+
+// evaluator owns the mutable state of one program execution.
+type evaluator struct {
+	scopes *ScopeStack
+	output io.Writer
+}
+
+func newEvaluator(output io.Writer) *evaluator {
+	return &evaluator{scopes: NewScopeStack(), output: output}
 }
