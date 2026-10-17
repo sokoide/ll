@@ -1,0 +1,27 @@
+(* Syntax: = definition, , sequence, | choice, { } repetition,
+   [ ] optional, (* ... *) comment. EOF is end of input. *)
+program     = stmts, EOF ;
+stmts       = { stmt } ;
+stmt        = assignment | while_stmt | put_stmt | ";" ;
+assignment  = IDENT, "=", expr, ";" ;
+while_stmt  = "while", "(", cond, ")", "{", stmts, "}" ;
+put_stmt    = "put", "(", put_list, ")", ";" ;
+put_list    = expr, { ",", expr } ;
+cond        = expr, [ compare_op, expr ] ;
+compare_op  = "==" | "!=" | ">=" | ">" | "<=" | "<" ;
+expr        = term, { ("+" | "-"), term } ;
+term        = primary, { ("*" | "/" | "%"), primary } ;
+primary     = NUMBER | IDENT | STRING | "(", expr, ")" ;
+
+(* Lexical rules: longest match; put and while are reserved words.
+   Whitespace is skipped between tokens, never inside a token. *)
+IDENT       = letter, { letter | digit } ;
+NUMBER      = digit, { digit } ;
+STRING      = '"', { double_char }, '"' | "'", { single_char }, "'" ;
+letter      = "A" … "Z" | "a" … "z" | "_" ;
+digit       = "0" … "9" ;
+whitespace  = " " | "\t" | "\r" | "\n" ;
+(* double_char: any Unicode character except double quote and EOF.
+   single_char: any Unicode character except single quote and EOF.
+   Strings may contain newlines. No escape sequences or comments in the language.
+   The range symbol … and character classes above are lexical notation. *)
